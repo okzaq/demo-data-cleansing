@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AIデータクレンジング＆名寄せ デモ | OKZAQ</title>
+<style>
+  :root {
+    --bg: #f5f7fa; --card: #ffffff; --ink: #1f2937; --sub: #6b7280;
+    --accent: #2563eb; --accent-soft: #dbeafe;
+    --ok: #059669; --ok-soft: #d1fae5;
+    --warn: #d97706; --warn-soft: #fef3c7;
+    --ng: #6b7280; --ng-soft: #f3f4f6;
+    --diff: #fff7d6; --border: #e5e7eb;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: "Hiragino Sans", "Yu Gothic UI", "Meiryo", sans-serif;
+         background: var(--bg); color: var(--ink); line-height: 1.6; }
+  .wrap { max-width: 1100px; margin: 0 auto; padding: 24px 16px 64px; }
+  header h1 { font-size: 1.5rem; margin: 0 0 4px; }
+  .badge { display: inline-block; font-size: .72rem; padding: 2px 10px; border-radius: 999px;
+           background: var(--accent-soft); color: var(--accent); font-weight: 600; vertical-align: middle; }
+  .disclaimer { font-size: .82rem; color: var(--sub); margin: 6px 0 20px; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+          padding: 20px; margin-bottom: 20px; }
+  .actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+  button, .file-label { cursor: pointer; border: none; border-radius: 8px; padding: 10px 18px;
+          font-size: .92rem; font-weight: 600; background: var(--accent); color: #fff; }
+  button.secondary, .file-label { background: #fff; color: var(--accent); border: 1.5px solid var(--accent); }
+  button:disabled { opacity: .5; cursor: wait; }
+  #status { font-size: .88rem; color: var(--sub); }
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; }
+  .stat { background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+          padding: 14px 16px; text-align: center; }
+  .stat .num { font-size: 1.6rem; font-weight: 700; color: var(--accent); }
+  .stat .label { font-size: .78rem; color: var(--sub); }
+  h2 { font-size: 1.05rem; margin: 0 0 12px; }
+  .table-scroll { overflow-x: auto; }
+  table { border-collapse: collapse; font-size: .8rem; white-space: nowrap; width: 100%; }
+  th, td { border: 1px solid var(--border); padding: 5px 8px; text-align: left; }
+  th { background: #f9fafb; position: sticky; top: 0; }
+  td.diff { background: var(--diff); }
+  td .before { color: #b45309; text-decoration: line-through; font-size: .72rem; display: block; }
+  tr.hold td { background: var(--warn-soft); }
+  .chip { display: inline-block; font-size: .72rem; font-weight: 700; padding: 1px 8px; border-radius: 999px; }
+  .chip.merge { background: var(--ok-soft); color: var(--ok); }
+  .chip.hold { background: var(--warn-soft); color: var(--warn); }
+  .chip.distinct { background: var(--ng-soft); color: var(--ng); }
+  .chip.group { background: var(--accent-soft); color: var(--accent); }
+  .pair-reason { color: var(--sub); font-size: .76rem; }
+  .error { background: #fee2e2; color: #b91c1c; padding: 10px 14px; border-radius: 8px; font-size: .88rem; }
+  .hidden { display: none; }
+  footer { font-size: .78rem; color: var(--sub); text-align: center; margin-top: 40px; }
+  .flow { font-size: .85rem; color: var(--sub); margin-top: 10px; }
+  .flow b { color: var(--ink); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>AIデータクレンジング＆名寄せ デモ <span class="badge">自主制作デモ</span></h1>
+    <p class="disclaimer">
+      架空の要件・架空のデータで作成した自主制作のデモです（実案件の納品物ではありません）。
+      表記揺れだらけのCSVを「ルールベース整形 → AI（Claude）による同一判定 → 確信が持てないものは保留」の
+      3段階で処理します。制作: <a href="https://github.com/okzaq" target="_blank" rel="noopener">OKZAQ</a>
+    </p>
+  </header>
+
+  <div class="card">
+    <div class="actions">
+      <button id="btn-customers">顧客データのサンプルで試す</button>
+      <button id="btn-facilities" class="secondary">公共施設データのサンプルで試す</button>
+      <label class="file-label">CSVをアップロード<input type="file" id="file-input" accept=".csv" hidden></label>
+      <span id="status"></span>
+    </div>
+    <p class="flow">
+      処理の流れ: <b>① ルールベース整形</b>（全半角・空白・㈱表記・住所の丁目番地・電話/郵便番号の統一）
+      → <b>② ルールで確実な重複を統合</b>（メール一致など）
+      → <b>③ 曖昧なペアだけAIが判定</b>（誤統合を防ぐため、確信度が低いものは「保留」として人間の確認に回します）
+    </p>
+    <div id="error" class="error hidden"></div>
+  </div>
+
+  <div id="result" class="hidden">
+    <div class="cards" id="summary"></div>
+
+    <div class="card" style="margin-top:20px">
+      <h2>突合の判定結果 <span id="ai-badge" class="badge"></span></h2>
+      <div class="table-scroll">
+        <table id="pairs-table">
+          <thead><tr><th>判定</th><th>レコードA</th><th>レコードB</th><th>候補になった根拠</th><th>確信度</th><th>判定理由</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>クレンジング結果（黄色 = 整形されたセル / オレンジ行 = 要確認）</h2>
+      <div class="actions" style="margin-bottom:10px">
+        <button id="btn-download" class="secondary">整形済みCSVをダウンロード</button>
+      </div>
+      <div class="table-scroll" style="max-height:480px; overflow-y:auto">
+        <table id="data-table"><thead></thead><tbody></tbody></table>
+      </div>
+    </div>
+  </div>
+
+  <footer>
+    自主制作ポートフォリオ（架空データ使用）/ FastAPI + Claude API /
+    <a href="https://github.com/okzaq/demo-data-cleansing" target="_blank" rel="noopener">ソースコード</a>
+  </footer>
+</div>
+
+<script>
+const $ = (sel) => document.querySelector(sel);
+let lastResult = null;
+
+function setBusy(busy, message) {
+  ["#btn-customers", "#btn-facilities"].forEach(s => $(s).disabled = busy);
+  $("#status").textContent = message || "";
+}
+
+async function run(fetcher) {
+  setBusy(true, "処理中…（AI判定を含むため数十秒かかることがあります）");
+  $("#error").classList.add("hidden");
+  try {
+    const res = await fetcher();
+    const body = await res.json();
+    if (!res.ok) throw new Error(body.detail || "処理に失敗しました");
+    lastResult = body;
+    render(body);
+  } catch (err) {
+    $("#error").textContent = err.message;
+    $("#error").classList.remove("hidden");
+    $("#result").classList.add("hidden");
+  } finally {
+    setBusy(false, "");
+  }
+}
+
+$("#btn-customers").onclick = () => run(() => fetch("/api/clean/sample?name=customers"));
+$("#btn-facilities").onclick = () => run(() => fetch("/api/clean/sample?name=facilities"));
+$("#file-input").onchange = (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const form = new FormData();
+  form.append("file", file);
+  run(() => fetch("/api/clean", { method: "POST", body: form }));
+  e.target.value = "";
+};
+
+$("#btn-download").onclick = () => {
+  if (!lastResult) return;
+  const blob = new Blob(["﻿" + lastResult.output_csv], { type: "text/csv" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "cleaned.csv";
+  a.click();
+  URL.revokeObjectURL(a.href);
+};
+
+function render(r) {
+  $("#result").classList.remove("hidden");
+
+  $("#summary").innerHTML = [
+    [r.summary.total_rows, "入力行数"],
+    [r.summary.normalized_rows, "整形された行"],
+    [r.summary.merged_groups, "名寄せグループ"],
+    [r.summary.hold_pairs, "要確認（保留）"],
+  ].map(([num, label]) =>
+    `<div class="stat"><div class="num">${num}</div><div class="label">${label}</div></div>`
+  ).join("");
+
+  $("#ai-badge").textContent = r.ai_used ? "Claude APIによる判定" : "モック判定（APIキー未設定）";
+
+  const verdictLabel = { merge: "統合", hold: "保留", distinct: "別と判定" };
+  const pairRows = [];
+  for (const p of r.auto_pairs) {
+    pairRows.push(`<tr><td><span class="chip merge">統合（ルール確定）</span></td>
+      <td>${esc(p.name_a)}</td><td>${esc(p.name_b)}</td>
+      <td class="pair-reason">${esc(p.reason)}</td><td>—</td><td class="pair-reason">ルールで確定</td></tr>`);
+  }
+  for (const p of r.ai_pairs) {
+    pairRows.push(`<tr><td><span class="chip ${p.verdict}">${verdictLabel[p.verdict] || p.verdict}</span></td>
+      <td>${esc(p.name_a)}</td><td>${esc(p.name_b)}</td>
+      <td class="pair-reason">${esc(p.reason)}</td>
+      <td>${(p.confidence * 100).toFixed(0)}%</td><td class="pair-reason">${esc(p.explanation)}</td></tr>`);
+  }
+  $("#pairs-table tbody").innerHTML =
+    pairRows.join("") || `<tr><td colspan="6">重複候補は見つかりませんでした</td></tr>`;
+
+  const groupOf = {};
+  r.groups.forEach((g, i) => g.forEach(idx => groupOf[idx] = i + 1));
+  const holdIdx = new Set();
+  r.ai_pairs.filter(p => p.verdict === "hold")
+    .forEach(p => { holdIdx.add(p.index_a); holdIdx.add(p.index_b); });
+
+  $("#data-table thead").innerHTML =
+    `<tr><th>グループ</th>${r.headers.map(h => `<th>${esc(h)}</th>`).join("")}</tr>`;
+  $("#data-table tbody").innerHTML = r.cleaned_rows.map((row, i) => {
+    const changed = new Set(r.changed_cells[i]);
+    const cells = r.headers.map(h => {
+      const now = row[h] ?? "", before = r.original_rows[i][h] ?? "";
+      return changed.has(h)
+        ? `<td class="diff"><span class="before">${esc(before)}</span>${esc(now)}</td>`
+        : `<td>${esc(now)}</td>`;
+    }).join("");
+    const group = groupOf[i] ? `<span class="chip group">G${String(groupOf[i]).padStart(3, "0")}</span>` : "";
+    return `<tr class="${holdIdx.has(i) ? "hold" : ""}"><td>${group}</td>${cells}</tr>`;
+  }).join("");
+}
+
+function esc(s) {
+  return String(s).replace(/[&<>"']/g, c =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+</script>
+</body>
+</html>
