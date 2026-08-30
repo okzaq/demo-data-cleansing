@@ -30,5 +30,5 @@ python -m pytest tests/ -q      # パイプラインのテスト（APIキー不�
 
 ## デプロイ
 
-Vercel。`api/index.py` がエントリポイント、`vercel.json` で全パスをそこへ rewrite。
-環境変数 `ANTHROPIC_API_KEY` は Vercel の Project Settings に設定する。
+Vercel（FastAPIフレームワーク自動検出）。ルート直下の `main.py` がエントリポイント。
+環境変数 `ANTHROPIC_API_KEY`（IDリンク型キーなら `ANTHROPIC_WORKSPACE_ID` も）は Vercel の Project Settings に設定する。

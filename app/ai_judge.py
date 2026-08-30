@@ -39,6 +39,14 @@ reason は日本語で1文、判定根拠を書くこと。
 """
 
 
+def _make_client() -> anthropic.Anthropic:
+    """IDリンク型APIキーは anthropic-workspace-id ヘッダーが必須のため、
+    環境変数 ANTHROPIC_WORKSPACE_ID があれば付与する。"""
+    workspace_id = os.environ.get("ANTHROPIC_WORKSPACE_ID", "")
+    headers = {"anthropic-workspace-id": workspace_id} if workspace_id else None
+    return anthropic.Anthropic(default_headers=headers)
+
+
 class PairVerdict(BaseModel):
     pair_id: int
     same_entity: bool
@@ -84,7 +92,7 @@ def judge_pairs(
         for idx, pair in enumerate(pairs)
     ]
 
-    client = anthropic.Anthropic()
+    client = _make_client()
     response = client.messages.parse(
         model=MODEL,
         max_tokens=8000,
